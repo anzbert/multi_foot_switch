@@ -48,8 +48,8 @@ const byte POT_PIN = A1;
 const int POT_ANALOG_MAX = 1020;
 const int POT_ANALOG_MIN = 49;
 const byte POT_NUM = 1;              //* number of potis
-const int POT_TIMEOUT = 300;         //* Amount of time the potentiometer will be read after it exceeds the POT_CHANGE_THRESHOLD
 const int POT_CHANGE_THRESHOLD = 10; //* Threshold for the potentiometer signal variation
+const int POT_TIMEOUT = 300;         //* Amount of time the potentiometer will be read after it exceeds the POT_CHANGE_THRESHOLD
 
 byte potPins[POT_NUM] = {POT_PIN};       //* Pin where the potentiometer is
 int potCurrentState[POT_NUM] = {};       // Current state of the pot
@@ -65,11 +65,11 @@ byte potMidiPrevState[POT_NUM] = {};    // Previous state of the midi value
 /////////////////
 // Received Midi
 
-byte rxUSB = 0;      // usb header
-byte rxChannel = 0;  // midi channel
-byte rxType = 0;     // midi data type
-byte rxPitch = 0;    // midi pitch
-byte rxVelocity = 0; // midi velocity
+byte rxUsbHeader = 0;
+byte rxChannel = 0;
+byte rxMidiMessageType = 0;
+byte rxPitch = 0;
+byte rxVelocity = 0;
 
 /////////////////////////////////////////////////
 // LEDS
@@ -88,22 +88,17 @@ void setup()
   // Serial.begin(9600); // turns on serial readout for debugging
   // Serial.begin(31250); // Set MIDI baud rate for DIN5 Midi output port
 
-  // buttons
   for (int i = 0; i < BUTTON_NUM; i++)
   {
     pinMode(BUTTON_PINS[i], INPUT_PULLUP); // sets pullup resistor mode for button pins
   }
 
-  // poti
+  pinMode(POT_PIN, INPUT_PULLUP); // INPUT_PULLUP, instead of INPUT to prevent floating input when expression pedal is not connected (RING)
   pinMode(POT_POWER_PIN, OUTPUT);
-  digitalWrite(POT_POWER_PIN, HIGH); // turns second pin to 5V power source for expression pedal (TIP)
+  digitalWrite(POT_POWER_PIN, HIGH); // to 5V power source for expression pedal (TIP)
 
-  // trying INPUT_PULLUP, instead of INPUT to prevent floating input when expression pedal is not connected
-  pinMode(POT_PIN, INPUT_PULLUP); // read expression pedal on this pin (RING)
-
-  // addressable RGB LEDS
   FastLED.addLeds<LED_TYPE, LED_DATA_PIN>(leds, LED_NUM);
-  FastLED.clear();           // all addressable LEDs off during setup
+  FastLED.clear();           // all LEDs off during setup
   FastLED.setBrightness(15); // Brightness (0-255)
   FastLED.show();
 }
@@ -129,31 +124,26 @@ void loop()
 
 void buttons()
 {
-
   for (int i = 0; i < BUTTON_NUM; i++)
   {
-
     buttonCurrentState[i] = digitalRead(BUTTON_PINS[i]);
 
-    if ((millis() - buttonPrevDebounceTime[i]) > BUTTON_DEBOUNCE_DELAY)
+    if ((millis() - buttonPrevDebounceTime[i]) > BUTTON_DEBOUNCE_DELAY && buttonPrevState[i] != buttonCurrentState[i])
     {
+      buttonPrevDebounceTime[i] = millis();
 
-      if (buttonPrevState[i] != buttonCurrentState[i])
+      if (buttonCurrentState[i] == LOW)
       {
-        buttonPrevDebounceTime[i] = millis();
-
-        if (buttonCurrentState[i] == LOW)
-        {
-          noteOn(MIDI_CHANNEL, MIDI_BASE_NOTE + i, 127); // channel, note, velocity
-        }
-        else
-        {
-          noteOff(MIDI_CHANNEL, MIDI_BASE_NOTE + i, 0); // channel, note, velocity
-        }
-        MidiUSB.flush();
-
-        buttonPrevState[i] = buttonCurrentState[i];
+        noteOn(MIDI_CHANNEL, MIDI_BASE_NOTE + i, 127);
       }
+      else
+      {
+        noteOff(MIDI_CHANNEL, MIDI_BASE_NOTE + i, 0);
+      }
+
+      MidiUSB.flush();
+
+      buttonPrevState[i] = buttonCurrentState[i];
     }
   }
 }
@@ -162,9 +152,8 @@ void potentiometers()
 {
 
   for (int i = 0; i < POT_NUM; i++)
-  { // Loops through all the potentiometers
-
-    potCurrentState[i] = analogRead(potPins[i]); // Reads the pot and stores it in the potCurrentState variable
+  {
+    potCurrentState[i] = analogRead(potPins[i]);
     // Serial.println(potCurrentState[i]);
 
     potMidiCurrentState[i] = map(potCurrentState[i], POT_ANALOG_MIN, POT_ANALOG_MAX, 0, 127); // Maps the reading of the potCurrentState to a value usable in midi
@@ -191,11 +180,11 @@ void potentiometers()
     { // If the potentiometer is still moving, send the change control
       if (potMidiPrevState[i] != potMidiCurrentState[i])
       {
-        controlChange(MIDI_CHANNEL, MIDI_EXPRESSION_CC + i, potMidiCurrentState[i]); // manda control change (channel, CC, value)
+        controlChange(MIDI_CHANNEL, MIDI_EXPRESSION_CC + i, potMidiCurrentState[i]);
         MidiUSB.flush();
 
         // Serial.println(potMidiCurrentState);
-        potPrevState[i] = potCurrentState[i]; // Stores the current reading of the potentiometer to compare with the next
+        potPrevState[i] = potCurrentState[i];
         potMidiPrevState[i] = potMidiCurrentState[i];
       }
     }
@@ -204,8 +193,7 @@ void potentiometers()
 
 void rxMidiRefresh()
 {
-  midiEventPacket_t rx; // from MidiUSB library
-  rx = MidiUSB.read();
+  midiEventPacket_t rx = MidiUSB.read(); // from MidiUSB library
 
   // Bitshift to separate rx.byte1 (byte = 8bit) into first 4bit (TYPE), and second 4bit (Channel)
   rxChannel = rx.byte1 & B00001111; // get channel
@@ -214,45 +202,41 @@ void rxMidiRefresh()
   {
 
     // Bitshift to separate rx.byte1 (byte = 8bit) into first 4bit (TYPE), and second 4bit (Channel)
-    rxType = rx.byte1 >> 4;
+    rxMidiMessageType = rx.byte1 >> 4;
     rxPitch = rx.byte2 - MIDI_BASE_NOTE; // Received pitch - midi-button-and-led first MIDI_BASE_NOTE setting
     rxVelocity = rx.byte3;               // Velocity variable - can be used, for example, for brightness
-    rxUSB = rx.header;                   // get usb header
+    rxUsbHeader = rx.header;             // get usb header
   }
 }
 
 void rxMidiToLeds()
 {
+  // Reject incorrect channel messages
   if (rxChannel != MIDI_CHANNEL)
   {
     return;
   }
 
   // NOTE ON
-  if (rxType == 9)
-  { // if receiving NoteON on correct channel
-
-    // cycle through FASTLEDs
+  if (rxMidiMessageType == 9)
+  {
     for (int i = 0; i < LED_NUM; i++)
-    { // cycle through all addressable LEDs
-
-      if (rxType == 9 && rxPitch == i)
-      { // if receiving noteON AND pitch matches LED
-        int mapvelocity = map(rxVelocity, 0, 127, 0, 255);
-        leds[i] = CHSV(mapvelocity, 255, 255); // control led by hue
+    {
+      // if receiving noteON AND pitch matches LED
+      if (rxMidiMessageType == 9 && rxPitch == i)
+      {
+        leds[i] = CHSV(map(rxVelocity, 0, 127, 0, 255), 255, 255); // control led on by hue
         FastLED.show();
       }
     }
   }
   // NOTE OFF
-  else if (rxType == 8)
-  { // if receiving NoteOFF on correct channel
-
-    // cycle through FASTLEDs
+  else if (rxMidiMessageType == 8)
+  {
     for (int i = 0; i < LED_NUM; i++)
-    { // cycle through all addressable LEDs
-      if (rxType == 8 && rxPitch == i)
-      {                          // if receiving noteOFF AND pitch  matches LED
+    {
+      if (rxMidiMessageType == 8 && rxPitch == i)
+      {
         leds[i] = CHSV(0, 0, 0); // turn LED off
         FastLED.show();
       }
@@ -264,13 +248,13 @@ void rxMidiToLeds()
 void serialDebug()
 {
 
-  if (rxUSB != 0)
+  if (rxUsbHeader != 0)
   {
     Serial.print("USB-Header: ");
-    Serial.print(rxUSB, HEX);
+    Serial.print(rxUsbHeader, HEX);
 
     Serial.print(" / Type: ");
-    switch (rxType)
+    switch (rxMidiMessageType)
     {
     case 8:
       Serial.print("NoteOFF");
@@ -283,7 +267,7 @@ void serialDebug()
       break;
     default:
       Serial.print("[");
-      Serial.print(rxType);
+      Serial.print(rxMidiMessageType);
       Serial.print("]");
       break;
     }
