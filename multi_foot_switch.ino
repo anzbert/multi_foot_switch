@@ -5,21 +5,19 @@
   - 3       FS 2
 
   - 7       INPUT L1    !TIP
-  - 8       INPUT L2    !RING   (2ch [STEREO] FS ONLY)
+  - 8       INPUT L2    !RING   (used with [STEREO] FS ONLY)
 
-  - A2      (analog) INPUT R1    !TIP  (5V OUTPUT)
-  - A1      (analog) INPUT R2    !RING (ANALOGREAD here)
+  - A2      INPUT R    !TIP  (used as 5V OUTPUT in HIGH mode)
+  - A1      INPUT R    !RING (ANALOGREAD here)
 
   - 16      2x FASTLEDS (WS2812B)
-
-  Functions:
 
   Buttons
   - NoteOn/Off
   - Corresponding LED on/off on received NoteOn/Off
 
   INPUTS
-  - Right input for external footswitch (soon: for expression pedal (potentiometer))
+  - Right input for expression pedal
   - Left input for external footswitch
 
 */
@@ -27,9 +25,6 @@
 //////////////////
 ////// LIBRARIES
 
-// #include <pitchToFrequency.h>
-// #include <pitchToNote.h>
-// #include <frequencyToNote.h>
 #include <MIDIUSB.h>
 
 //////// FASTLED library
@@ -40,17 +35,16 @@
 
 // !! MIDI SETTINGS !! //
 #define CHANNEL 10 // MIDI channel to be used (1-16). default: 10
-
+byte note = 34;    // Lowest note to be used for buttons and LEDs (0-127)
+byte expressionCC = 11;
 byte midiCh = CHANNEL - 1;
-byte note = 34;         // Lowest note to be used for buttons and LEDs (0-127)
-byte expressionCC = 11; // Lowest MIDI CC to be used
 
 ///////////////
 //// Buttons
-const byte nButtons = 3;                    //*number of buttons (2 buttons + 2 encoder buttons + 1 digital crossfader)
-const byte buttonPin[nButtons] = {3, 2, 7}; //* the number of the pushbutton pins in the desired order
-int buttonCstate[nButtons] = {};            // stores the button current value
-int buttonPstate[nButtons] = {};            // stores the button previous value
+const byte nButtons = 4;                       // number of buttons
+const byte buttonPin[nButtons] = {3, 2, 7, 8}; // the number of the pushbutton pins in the desired order
+int buttonCstate[nButtons] = {};               // stores the button current value
+int buttonPstate[nButtons] = {};               // stores the button previous value
 
 unsigned long lastDebounceTime[nButtons] = {}; // the last time the pin was toggled
 const byte debounceDelay = 13;                 // the debounce time in ms; increase if the output flickers (default = 13)
@@ -58,7 +52,7 @@ const byte debounceDelay = 13;                 // the debounce time in ms; incre
 /////////////////////////////////////////////
 // Potentiometers
 
-const byte powerPoti = A2; // for OUTPUT of 5v to TIP
+const byte powerPinForPoti5V = A2; // for OUTPUT of 5v to TIP
 const byte pinPoti = A1;
 const int analogMax = 1020;
 const int analogMin = 49;
@@ -90,8 +84,6 @@ byte rxVelocity = 0; // midi velocity
 /////////////////////////////////////////////////
 // LEDS
 
-// const int powerLed = 7; // powerLed pin (pushbuttonswitch LED)
-
 // WS2812B LEDS for midi
 #define NUM_LEDS 2  // Number of addressable LEDS
 #define DATA_PIN 15 // LED PIN
@@ -104,11 +96,7 @@ CRGB leds[NUM_LEDS];
 void setup()
 {
   // Serial.begin(9600); // turns on serial readout for debugging
-  // Serial.begin(31250);  // Set MIDI baud rate:
-
-  // Power LED
-  //   pinMode(powerLed, OUTPUT); // sets power led pin to output mode, if using one
-  //   digitalWrite (powerLed, HIGH); // turns powerLed ON
+  // Serial.begin(31250); // Set MIDI baud rate for DIN5 Midi output port
 
   // buttons
   for (int i = 0; i < nButtons; i++)
@@ -117,8 +105,8 @@ void setup()
   }
 
   // poti
-  pinMode(powerPoti, OUTPUT);
-  digitalWrite(powerPoti, HIGH); // turns second pin to 5V power source for expression pedal (TIP)
+  pinMode(powerPinForPoti5V, OUTPUT);
+  digitalWrite(powerPinForPoti5V, HIGH); // turns second pin to 5V power source for expression pedal (TIP)
 
   // trying INPUT_PULLUP, instead of INPUT to prevent floating input when expression pedal is not connected
   pinMode(pinPoti, INPUT_PULLUP); // read expression pedal on this pin (RING)
@@ -219,11 +207,6 @@ void potentiometers()
     { // If the potentiometer is still moving, send the change control
       if (midiPState[i] != midiCState[i])
       {
-
-        // use if using with ATmega328 (uno, mega, nano...)
-        // MIDI.sendControlChange(expressionCC+i, midiCState[i], midiCh);
-
-        // use if using with ATmega32U4 (micro, pro micro, leonardo...)
         controlChange(midiCh, expressionCC + i, midiCState[i]); // manda control change (channel, CC, value)
         MidiUSB.flush();
 
@@ -259,11 +242,15 @@ void refreshMidi()
 
 void rxMidiLeds()
 {
+  if (rxChannel != midiCh)
+  {
+    return;
+  }
 
   //////////////////
   // NOTEON received
 
-  if (rxChannel == midiCh && rxType == 9)
+  if (rxType == 9)
   { // if receiving NoteON on correct channel
 
     // cycle through FASTLEDs
@@ -278,11 +265,7 @@ void rxMidiLeds()
       }
     }
   }
-
-  ///////////////////
-  // NOTEOFF received
-
-  if (rxChannel == midiCh && rxType == 8)
+  else if (rxType == 8)
   { // if receiving NoteOFF on correct channel
 
     // cycle through FASTLEDs
