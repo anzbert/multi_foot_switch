@@ -12,6 +12,9 @@
 
   - 16      2x FASTLEDS (WS2812B)
 
+  - 1 (TX)  DIN5 Midi Out port through Serial1 Hardware Pin
+  - 5       DIN5_POWER_PIN (used as 5V OUTPUT in HIGH mode)
+
   Buttons
   - NoteOn/Off
   - Corresponding LED on/off on received NoteOn/Off
@@ -29,6 +32,8 @@
 const byte MIDI_BASE_NOTE = 34; // Lowest note to be used for buttons and LEDs (0-127)
 const byte MIDI_EXPRESSION_CC = 11;
 const byte MIDI_CHANNEL = 10 - 1; // def: channel 10
+
+const byte DIN5_POWER_PIN = 5;
 
 ///////////////
 //// Buttons
@@ -86,7 +91,7 @@ CRGB leds[LED_NUM];
 void setup()
 {
   // Serial.begin(9600); // turns on serial readout for debugging
-  // Serial.begin(31250); // Set MIDI baud rate for DIN5 Midi output port
+  Serial1.begin(31250); // Set DIN5 out port MIDI baud rate on hardware pin (Serial1)
 
   for (int i = 0; i < BUTTON_NUM; i++)
   {
@@ -94,8 +99,12 @@ void setup()
   }
 
   pinMode(POT_PIN, INPUT_PULLUP); // INPUT_PULLUP, instead of INPUT to prevent floating input when expression pedal is not connected (RING)
+
   pinMode(POT_POWER_PIN, OUTPUT);
-  digitalWrite(POT_POWER_PIN, HIGH); // to 5V power source for expression pedal (TIP)
+  digitalWrite(POT_POWER_PIN, HIGH); // as 5V power source for expression pedal (TIP)
+
+  pinMode(DIN5_POWER_PIN, OUTPUT);
+  digitalWrite(DIN5_POWER_PIN, HIGH); // as 5V power source for DIN5 Midi
 
   FastLED.addLeds<LED_TYPE, LED_DATA_PIN>(leds, LED_NUM);
   FastLED.clear();           // all LEDs off during setup
@@ -284,33 +293,33 @@ void serialDebug()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
-// Arduino (pro)micro midi functions MIDIUSB Library for sending CCs and noteON and noteOFF
+// MIDI Send Commands
+
 void noteOn(byte channel, byte pitch, byte velocity)
 {
   midiEventPacket_t noteOn = {0x09, 0x90 | channel, pitch, velocity};
   MidiUSB.sendMIDI(noteOn);
+  serialMidiCommand(0x90 | channel, pitch, velocity);
 }
 
 void noteOff(byte channel, byte pitch, byte velocity)
 {
   midiEventPacket_t noteOff = {0x08, 0x80 | channel, pitch, velocity};
   MidiUSB.sendMIDI(noteOff);
+  serialMidiCommand(0x80 | channel, pitch, velocity);
 }
 
 void controlChange(byte channel, byte control, byte value)
 {
   midiEventPacket_t event = {0x0B, 0xB0 | channel, control, value};
   MidiUSB.sendMIDI(event);
+  serialMidiCommand(0xB0 | channel, control, value);
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
-// MIDI messages via serial bus
-
-// Sends a midi signal on channel 1 (0x90)
-// cmd = message type and channel,
-void serialMidiCommand(int cmd, int pitch, int velocity)
+// Send MIDI commands via hardware serial pin1 (Tx)
+void serialMidiCommand(int cmd, int byte2, int byte3)
 {
-  Serial.write(cmd);
-  Serial.write(pitch);
-  Serial.write(velocity);
+  Serial1.write(cmd);
+  Serial1.write(byte2);
+  Serial1.write(byte3);
 }

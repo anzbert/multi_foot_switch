@@ -1,7 +1,13 @@
 {
-    "board": "arduino:avr:leonardo",
+    "board": "arduino:avr:micro",
     "programmer": "avrispmkii",
     "sketch": "multi_foot_switch.ino",
     "output": "../build",
-    "port": "/dev/tty.usbmodemMIDI1"
+    "port": "/dev/tty.usbmodemMIDI1",
+    "buildPreferences": [
+        [
+            "build.extra_flags",
+            "-D__AVR_ATmega32U4__"
+        ]
+    ]
 }
