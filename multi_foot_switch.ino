@@ -28,18 +28,24 @@
 #include <MIDIUSB.h>
 #include <FastLED.h>
 
+// PINS
+const byte BUTTON_NUM = 4;                         // number of button Pins
+const byte BUTTON_PINS[BUTTON_NUM] = {3, 2, 7, 8}; // the number of the pushbutton pins in the desired order
+
+const byte POT_NUM = 1; // number of poti Pins
+const byte POT_PIN = A1;
+
+const byte POT_POWER_PIN = A2; // for 5v to TIP
+const byte DIN5_POWER_PIN = 5; // for 5v to DIN5 Midi out
+
 // !! MIDI SETTINGS !! //
 const byte MIDI_BASE_NOTE = 34; // Lowest note to be used for buttons and LEDs (0-127)
 const byte MIDI_EXPRESSION_CC = 11;
 const byte MIDI_CHANNEL = 10 - 1; // def: channel 10
 
-const byte DIN5_POWER_PIN = 5;
-
 ///////////////
 //// Buttons
-const byte BUTTON_NUM = 4;                         // number of buttons
-const byte BUTTON_PINS[BUTTON_NUM] = {3, 2, 7, 8}; // the number of the pushbutton pins in the desired order
-const byte BUTTON_DEBOUNCE_DELAY = 13;             // the debounce time in ms; increase if the output flickers (default = 13)
+const byte BUTTON_DEBOUNCE_DELAY = 13; // the debounce time in ms; increase if the output flickers (default = 13)
 
 int buttonCurrentState[BUTTON_NUM] = {};               // stores the button current value
 int buttonPrevState[BUTTON_NUM] = {};                  // stores the button previous value
@@ -47,12 +53,9 @@ unsigned long buttonPrevDebounceTime[BUTTON_NUM] = {}; // the last time the pin 
 
 /////////////////////////////////////////////
 // Potentiometers
-
-const byte POT_POWER_PIN = A2; // for OUTPUT of 5v to TIP
-const byte POT_PIN = A1;
 const int POT_ANALOG_MAX = 1020;
 const int POT_ANALOG_MIN = 49;
-const byte POT_NUM = 1;              //* number of potis
+
 const int POT_CHANGE_THRESHOLD = 10; //* Threshold for the potentiometer signal variation
 const int POT_TIMEOUT = 300;         //* Amount of time the potentiometer will be read after it exceeds the POT_CHANGE_THRESHOLD
 
