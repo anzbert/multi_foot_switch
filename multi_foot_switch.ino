@@ -20,7 +20,7 @@ enum midiMessage // Accepted types of Midi Messages
   NOTE,
   NOTE_OFF,
   CC,
-  PC, // 0-127 (equals Midi Programs 1-128)
+  PC, // 0-127 (=> equals Midi Programs 1-128)
   START,
   STOP,
   CONT
@@ -30,11 +30,11 @@ struct program // Store Program settings
 {
   byte colorHue;                  // color of the LEDs in that program (0-255 or HUE_*)
   byte expressionCC;              // expression pedal control value to send on (0-127)
-  byte expressionChannel;         // expression pedal channel (0-15)
+  byte expressionChannel;         // expression pedal channel (0-15) => 1-16
   byte values[NUM_BUTTONS];       // pitch or control value to send on (0-127)
   midiMessage types[NUM_BUTTONS]; // type of midi message to send
   bool toggle[NUM_BUTTONS];       // toggle (1) or momentary (0) function
-  byte channels[NUM_BUTTONS];     // channel to send on (0-15)
+  byte channels[NUM_BUTTONS];     // channel to send on (0-15) => 1-16
 };
 
 // ////////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +42,7 @@ struct program // Store Program settings
 // PROGRAM SETTINGS
 // ////////////////////////////////////////////////////////////////////////////////////
 
-// Button Info: First 6 values for internal foot switches and last 2 for external
+// Button Info: First 2 values for internal foot switches and last 2 for external
 
 const program PROG0 = {
     .colorHue = HUE_GREEN,
@@ -54,9 +54,6 @@ const program PROG0 = {
     .channels = {0, 0, 0, 0},
 };
 
-const byte NUM_PROGRAMS = 1;
-const program PROGRAMS[NUM_PROGRAMS] = {PROG0};
-
 // EXPRESSION PEDAL SETTINGS
 const unsigned int ANALOG_MIN = 49;
 const unsigned int ANALOG_MAX = 1020;
@@ -65,6 +62,11 @@ const unsigned int VAR_THRESHOLD = 16; // Threshold for the potentiometer signal
 
 // FOOT SWITCH SETTINGS
 const unsigned int DEBOUNCE_DELAY = 50; // debounce time in ms; increase if the output flickers
+
+// DON'T CHANGE THESE:
+// Number of programs can't be changed on this device
+const byte NUM_PROGRAMS = 1;
+const program PROGRAMS[NUM_PROGRAMS] = {PROG0};
 
 // ////////////////////////////////////////////////////////////////////////////////////
 // ////////////////////////////////////////////////////////////////////////////////////
@@ -81,7 +83,7 @@ byte currentProg = 0x00;
 byte lastProgPin1State = 0xFF;
 byte lastProgPin2State = 0xFF;
 
-// stores current on/off state for toggles for all 3 programs
+// stores current on/off state for toggles for all programs
 bool currentlyOnStates[NUM_PROGRAMS][NUM_BUTTONS] = {};
 
 // store foot switch state and time
