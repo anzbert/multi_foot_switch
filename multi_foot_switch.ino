@@ -132,7 +132,7 @@ void setup()
   digitalWrite(DIN5_POWER_PIN, HIGH); // as 5V power source for DIN5 Midi
 
   FastLED.addLeds<WS2812B, LEDS_DATA_PIN>(leds, NUM_LEDS); // init LEDs
-  FastLED.setBrightness(8);                                // set Brightness (0-255)
+  FastLED.setBrightness(8);                                // max Brightness (0-255). keep low! don't draw too much pin power!
   FastLED.clear();                                         // all LEDs off
   FastLED.show();                                          // refreshLed
 }
