@@ -1,107 +1,129 @@
-/*  UPDATED FOOTSWITCH
-
-  Current PIN use:
-  - 2       FS 1
-  - 3       FS 2
-
-  - 7       INPUT L1    !TIP
-  - 8       INPUT L2    !RING   (used with [STEREO] FS ONLY)
-
-  - A2      INPUT R    !TIP  (used as 5V OUTPUT in HIGH mode)
-  - A1      INPUT R    !RING (ANALOGREAD here)
-
-  - 16      2x FASTLEDS (WS2812B)
-
-  - 1 (TX)  DIN5 Midi Out port through Serial1 Hardware Pin
-  - 5       DIN5_POWER_PIN (used as 5V OUTPUT in HIGH mode)
-
-  Buttons
-  - NoteOn/Off
-  - Corresponding LED on/off on received NoteOn/Off
-
-  INPUTS
-  - Right input for expression pedal
-  - Left input for external footswitch
-
-*/
-
 #include <MIDIUSB.h>
 #include <FastLED.h>
+#include <ResponsiveAnalogRead.h>
 
-// PINS
-const byte BUTTON_NUM = 4;                         // number of button Pins
-const byte BUTTON_PINS[BUTTON_NUM] = {3, 2, 7, 8}; // the number of the pushbutton pins in the desired order
+// NUMBER OF FOOT SWITCHES AND LEDS
+const byte NUM_BUTTONS = 4; // 2 internal buttons + 2 external
+const byte NUM_LEDS = 2;    // 0 - 2 are the button LEDs
 
-const byte POT_NUM = 1; // number of poti Pins
-const byte POT_PIN = A1;
+// HARDWARE PINS
+// 'Serial1' Tx pin for DIN Midi Out = 1
+const byte BUTTON_PINS[NUM_BUTTONS] = {3, 2, 7, 8};
+const byte PIN_POTI = A1;      // (analog) EXPR. Pedal (Read on RING)
+const byte LEDS_DATA_PIN = 15; // 2x fastleds (WS2812B)
 
 const byte POT_POWER_PIN = A2; // for 5v to TIP
 const byte DIN5_POWER_PIN = 5; // for 5v to DIN5 Midi out
 
-// !! MIDI SETTINGS !! //
-const byte MIDI_BASE_NOTE = 34; // Lowest note to be used for buttons and LEDs (0-127)
-const byte MIDI_EXPRESSION_CC = 11;
-const byte MIDI_CHANNEL = 10 - 1; // def: channel 10
+// TYPE DEFINITIONS
+enum midiMessage // Accepted types of Midi Messages
+{
+  NOTE,
+  NOTE_OFF,
+  CC,
+  PC, // 0-127 (equals Midi Programs 1-128)
+  START,
+  STOP,
+  CONT
+};
 
-///////////////
-//// Buttons
-const byte BUTTON_DEBOUNCE_DELAY = 13; // the debounce time in ms; increase if the output flickers (default = 13)
+struct program // Store Program settings
+{
+  byte colorHue;                  // color of the LEDs in that program (0-255 or HUE_*)
+  byte expressionCC;              // expression pedal control value to send on (0-127)
+  byte expressionChannel;         // expression pedal channel (0-15)
+  byte values[NUM_BUTTONS];       // pitch or control value to send on (0-127)
+  midiMessage types[NUM_BUTTONS]; // type of midi message to send
+  bool toggle[NUM_BUTTONS];       // toggle (1) or momentary (0) function
+  byte channels[NUM_BUTTONS];     // channel to send on (0-15)
+};
 
-int buttonCurrentState[BUTTON_NUM] = {};               // stores the button current value
-int buttonPrevState[BUTTON_NUM] = {};                  // stores the button previous value
-unsigned long buttonPrevDebounceTime[BUTTON_NUM] = {}; // the last time the pin was toggled
+// ////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////
+// PROGRAM SETTINGS
+// ////////////////////////////////////////////////////////////////////////////////////
 
-/////////////////////////////////////////////
-// Potentiometers
-const int POT_ANALOG_MAX = 1020;
-const int POT_ANALOG_MIN = 49;
+// Button Info: First 6 values for internal foot switches and last 2 for external
 
-const int POT_CHANGE_THRESHOLD = 10; //* Threshold for the potentiometer signal variation
-const int POT_TIMEOUT = 300;         //* Amount of time the potentiometer will be read after it exceeds the POT_CHANGE_THRESHOLD
+const program PROG0 = {
+    .colorHue = HUE_GREEN,
+    .expressionCC = 11,
+    .expressionChannel = 0,
+    .values = {0, 1, 2, 3},
+    .types = {NOTE, NOTE, NOTE, NOTE},
+    .toggle = {0, 0, 0, 0}, // toggle (1) or momentary (0) function
+    .channels = {0, 0, 0, 0},
+};
 
-byte potPins[POT_NUM] = {POT_PIN};       //* Pin where the potentiometer is
-int potCurrentState[POT_NUM] = {};       // Current state of the pot
-int potPrevState[POT_NUM] = {};          // Previous state of the pot
-int potVar = 0;                          // Difference between the current and previous state of the pot
-boolean potMoving = true;                // If the potentiometer is moving
-unsigned long potPrevTime[POT_NUM] = {}; // Previously stored time
-unsigned long potTime[POT_NUM] = {};     // Stores the time that has elapsed since the potTime was reset
+const byte NUM_PROGRAMS = 1;
+const program PROGRAMS[NUM_PROGRAMS] = {PROG0};
 
-byte potMidiCurrentState[POT_NUM] = {}; // Current state of the midi value
-byte potMidiPrevState[POT_NUM] = {};    // Previous state of the midi value
+// EXPRESSION PEDAL SETTINGS
+const unsigned int ANALOG_MIN = 49;
+const unsigned int ANALOG_MAX = 1020;
+const unsigned int TIMEOUT = 200;      // Amount of time the potentiometer will be read after it exceeds the varThreshold
+const unsigned int VAR_THRESHOLD = 16; // Threshold for the potentiometer signal variation
 
-/////////////////
-// Received Midi
+// FOOT SWITCH SETTINGS
+const unsigned int DEBOUNCE_DELAY = 50; // debounce time in ms; increase if the output flickers
 
-byte rxUsbHeader = 0;
-byte rxChannel = 0;
-byte rxMidiMessageType = 0;
-byte rxPitch = 0;
-byte rxVelocity = 0;
+// ////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////
 
-/////////////////////////////////////////////////
-// LEDS
+// ////////////////////////////////////////////////////////////////////////////////////
+// GLOBAL MUTABLE VARIABLES
 
-// WS2812B LEDS for midi
-#define LED_NUM 2       // Number of addressable LEDS
-#define LED_DATA_PIN 15 // LED PIN
-#define LED_TYPE WS2812B
-CRGB leds[LED_NUM];
+// Holds LEDS state
+CRGB leds[NUM_LEDS] = {};
+bool lastLedState[NUM_LEDS] = {};
 
-////////////////////////////////////
-/////////////////// !! SETUP !! ////
+// stores currently selected program
+byte currentProg = 0x00;
+byte lastProgPin1State = 0xFF;
+byte lastProgPin2State = 0xFF;
 
+// stores current on/off state for toggles for all 3 programs
+bool currentlyOnStates[3][NUM_BUTTONS] = {};
+
+// store foot switch state and time
+byte buttonPreviousState[NUM_BUTTONS] = {};       // stores the buttons prev values
+unsigned long lastDebounceTime[NUM_BUTTONS] = {}; // the last time the button pins were toggled
+
+// Expression pedal state, time and mid value
+int potPreviousState = 0;
+unsigned long potPreviousTime = 0;
+bool potStillMoving = true;
+byte exprPreviousMidiValue = 0xFF;
+
+// Stores the latest received midi data
+struct rxMidi
+{
+  byte usbHeader = 0x00;
+  byte channel = 0x00;
+  byte type = 0x00;
+  byte pitch = 0x00;
+  byte velocity = 0x00;
+} rxMidi;
+
+// counts received midi clock pulses
+byte midiClockCounter = 0x00;
+
+/////////////////////////////////////////////////////////////////////
+/////////////////// !! SETUP !! /////////////////////////////////////
 void setup()
 {
-  // Serial.begin(9600); // turns on serial readout for debugging
-  Serial1.begin(31250); // Set DIN5 out port MIDI baud rate on hardware pin (Serial1)
+  // IFNotDEFined, because code generates an error squiggle in VSCode with the
+  // current arduino extension even if there is no problem with 'Serial1'
+#ifndef __INTELLISENSE__
+  Serial1.begin(31250); // Set MIDI baud rate
+#endif
+  // Serial.begin(9600); // for debugging
 
-  for (int i = 0; i < BUTTON_NUM; i++)
+  pinMode(PIN_POTI, INPUT_PULLUP); // expr. pedal potentiometer pin (RING)
+  for (int i = 0; i < NUM_BUTTONS; i++)
   {
-    pinMode(BUTTON_PINS[i], INPUT_PULLUP); // sets pullup resistor mode for button pins
+    pinMode(BUTTON_PINS[i], INPUT_PULLUP); // foot switch pins
   }
-
-  pinMode(POT_PIN, INPUT_PULLUP); // INPUT_PULLUP, instead of INPUT to prevent floating input when expression pedal is not connected (RING)
 
   pinMode(POT_POWER_PIN, OUTPUT);
   digitalWrite(POT_POWER_PIN, HIGH); // as 5V power source for expression pedal (TIP)
@@ -109,220 +131,321 @@ void setup()
   pinMode(DIN5_POWER_PIN, OUTPUT);
   digitalWrite(DIN5_POWER_PIN, HIGH); // as 5V power source for DIN5 Midi
 
-  FastLED.addLeds<LED_TYPE, LED_DATA_PIN>(leds, LED_NUM);
-  FastLED.clear();           // all LEDs off during setup
-  FastLED.setBrightness(15); // Brightness (0-255)
-  FastLED.show();
+  FastLED.addLeds<WS2812B, LEDS_DATA_PIN>(leds, NUM_LEDS); // init LEDs
+  FastLED.setBrightness(8);                                // set Brightness (0-255)
+  FastLED.clear();                                         // all LEDs off
+  FastLED.show();                                          // refreshLed
 }
 
-/////////////////////////////////
-//////////// !! LOOP !! /////////
-
+//////////////////////////////////////////////////////////////////
+//////////// !! LOOP !! //////////////////////////////////////////
 void loop()
 {
-  buttons();
+  // updateProgram();
 
-  potentiometers();
+  sendFootSwitchMidi();
 
-  rxMidiRefresh();
+  sendExpressionPedalMidi();
 
-  rxMidiToLeds();
+  receiveUsbMidi();
+
+  updateToggleState();
+
+  updateLeds();
 
   // serialDebug();
 }
+//////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////
 
-///////////////////////////////////
-/////////////// FUNCTIONS /////////
+// UPDATE PROGRAM
+// void updateProgram()
+// {
+// not implemented on this device yet
+// should just change 'currentProg' and refresh LED color
+// }
 
-void buttons()
+// BUTTONS
+void sendFootSwitchMidi()
 {
-  for (int i = 0; i < BUTTON_NUM; i++)
+  for (int i = 0; i < NUM_BUTTONS; i++)
   {
-    buttonCurrentState[i] = digitalRead(BUTTON_PINS[i]);
-
-    if ((millis() - buttonPrevDebounceTime[i]) > BUTTON_DEBOUNCE_DELAY && buttonPrevState[i] != buttonCurrentState[i])
+    if ((millis() - lastDebounceTime[i]) > DEBOUNCE_DELAY)
     {
-      buttonPrevDebounceTime[i] = millis();
+      byte buttonCurrentState = digitalRead(BUTTON_PINS[i]);
 
-      if (buttonCurrentState[i] == LOW)
+      if (buttonPreviousState[i] != buttonCurrentState)
       {
-        noteOn(MIDI_CHANNEL, MIDI_BASE_NOTE + i, 127);
+        lastDebounceTime[i] = millis();
+
+        if (buttonCurrentState == LOW) // BUTTON PUSHED
+        {
+          byte sendValue = 127;
+
+          if (PROGRAMS[currentProg].toggle[i])
+          {
+            currentlyOnStates[currentProg][i] = !currentlyOnStates[currentProg][i];
+            sendValue = currentlyOnStates[currentProg][i] ? 127 : 0;
+          }
+
+          sendMidi(PROGRAMS[currentProg].types[i], PROGRAMS[currentProg].channels[i], PROGRAMS[currentProg].values[i], sendValue);
+        }
+        else if (PROGRAMS[currentProg].toggle[i] == false) // BUTTON RELEASED
+        {
+          if (PROGRAMS[currentProg].types[i] == midiMessage::NOTE)
+          {
+            sendMidi(midiMessage::NOTE_OFF, PROGRAMS[currentProg].channels[i], PROGRAMS[currentProg].values[i], 0);
+          }
+          if (PROGRAMS[currentProg].types[i] == midiMessage::CC)
+          {
+            sendMidi(midiMessage::CC, PROGRAMS[currentProg].channels[i], PROGRAMS[currentProg].values[i], 0);
+          }
+        }
+
+        buttonPreviousState[i] = buttonCurrentState;
+      }
+    }
+  }
+}
+
+/////////////////////////////////////////////
+// EXPRESSION PEDAL
+void sendExpressionPedalMidi()
+{
+  int potCurrentState = analogRead(PIN_POTI);
+  byte exprCurrentMidiValue = map(potCurrentState, ANALOG_MIN, ANALOG_MAX, 0, 127);
+
+  int potChange = abs(potCurrentState - potPreviousState);
+
+  if (potChange > VAR_THRESHOLD)
+  { // Opens the gate if the potentiometer variation is greater than the threshold
+    potPreviousTime = millis();
+  }
+
+  // If the potTimer is less than the maximum allowed time it means that the potentiometer is still moving
+  potStillMoving = millis() - potPreviousTime < TIMEOUT;
+
+  if (potStillMoving)
+  { // If the potentiometer is still moving, send the control change (if necessary)
+    if (exprPreviousMidiValue != exprCurrentMidiValue)
+    {
+      sendMidi(midiMessage::CC, PROGRAMS[currentProg].expressionChannel, PROGRAMS[currentProg].expressionCC, exprCurrentMidiValue);
+
+      potPreviousState = potCurrentState;
+      exprPreviousMidiValue = exprCurrentMidiValue;
+    }
+  }
+}
+
+/////////////////////////////////////////////////
+///////////// REFRESH RECEIVED MIDI DATA BUFFER
+void receiveUsbMidi()
+{
+  // MidiUSB library commands
+  midiEventPacket_t rx;
+  rx = MidiUSB.read();
+
+  // Bitshift to separate rx.byte1 (byte = 8bit) into first 4bit (TYPE), and second 4bit (Channel)
+  rxMidi.channel = rx.byte1 & B00001111; // get channel
+
+  // Bitshift to separate rx.byte1 (byte = 8bit) into first 4bit (TYPE), and second 4bit (Channel)
+  rxMidi.type = rx.byte1 >> 4;
+  rxMidi.pitch = rx.byte2;      // Received pitch - midi-button-and-led first note setting
+  rxMidi.velocity = rx.byte3;   // Velocity variable - can be used, for example, for brightness
+  rxMidi.usbHeader = rx.header; // get usb header
+}
+
+void updateToggleState()
+{
+  if (rxMidi.type == 0x9 || rxMidi.type == 0xB || rxMidi.type == 0x8)
+  {
+    for (byte i = 0; i < NUM_BUTTONS; i++)
+    {
+      if (rxMidi.pitch != PROGRAMS[currentProg].values[i])
+        continue;
+
+      if (rxMidi.type == 0x8 || rxMidi.velocity == 0)
+      {
+        currentlyOnStates[currentProg][i] = false;
       }
       else
       {
-        noteOff(MIDI_CHANNEL, MIDI_BASE_NOTE + i, 0);
+        currentlyOnStates[currentProg][i] = true;
       }
-
-      MidiUSB.flush();
-
-      buttonPrevState[i] = buttonCurrentState[i];
     }
   }
 }
 
-void potentiometers()
+void updateLeds()
 {
-
-  for (int i = 0; i < POT_NUM; i++)
+  /////////////////////////////
+  // check on/off state
+  for (byte b = 0; b < NUM_LEDS; b++)
   {
-    potCurrentState[i] = analogRead(potPins[i]);
-    // Serial.println(potCurrentState[i]);
-
-    potMidiCurrentState[i] = map(potCurrentState[i], POT_ANALOG_MIN, POT_ANALOG_MAX, 0, 127); // Maps the reading of the potCurrentState to a value usable in midi
-
-    potVar = abs(potCurrentState[i] - potPrevState[i]); // Calculates the absolute value between the difference between the current and previous state of the pot
-
-    if (potVar > POT_CHANGE_THRESHOLD)
-    {                            // Opens the gate if the potentiometer variation is greater than the threshold
-      potPrevTime[i] = millis(); // Stores the previous time
-    }
-
-    potTime[i] = millis() - potPrevTime[i]; // Resets the potTime 11000 - 11000 = 0ms
-
-    if (potTime[i] < POT_TIMEOUT)
-    { // If the potTime is less than the maximum allowed time it means that the potentiometer is still moving
-      potMoving = true;
-    }
-    else
+    if (currentlyOnStates[currentProg][b] != lastLedState[b])
     {
-      potMoving = false;
-    }
+      byte led = b;
 
-    if (potMoving == true)
-    { // If the potentiometer is still moving, send the change control
-      if (potMidiPrevState[i] != potMidiCurrentState[i])
+      if (currentlyOnStates[currentProg][b])
       {
-        controlChange(MIDI_CHANNEL, MIDI_EXPRESSION_CC + i, potMidiCurrentState[i]);
-        MidiUSB.flush();
-
-        // Serial.println(potMidiCurrentState);
-        potPrevState[i] = potCurrentState[i];
-        potMidiPrevState[i] = potMidiCurrentState[i];
+        leds[led] = CHSV(PROGRAMS[currentProg].colorHue, 255, 255);
       }
+      else
+      {
+        leds[led] = CHSV(0, 0, 0);
+      }
+
+      FastLED.show();
+      lastLedState[b] = currentlyOnStates[currentProg][b];
     }
   }
 }
 
-void rxMidiRefresh()
-{
-  midiEventPacket_t rx = MidiUSB.read(); // from MidiUSB library
-
-  // Bitshift to separate rx.byte1 (byte = 8bit) into first 4bit (TYPE), and second 4bit (Channel)
-  rxChannel = rx.byte1 & B00001111; // get channel
-
-  if (rxChannel == MIDI_CHANNEL)
-  {
-
-    // Bitshift to separate rx.byte1 (byte = 8bit) into first 4bit (TYPE), and second 4bit (Channel)
-    rxMidiMessageType = rx.byte1 >> 4;
-    rxPitch = rx.byte2 - MIDI_BASE_NOTE; // Received pitch - midi-button-and-led first MIDI_BASE_NOTE setting
-    rxVelocity = rx.byte3;               // Velocity variable - can be used, for example, for brightness
-    rxUsbHeader = rx.header;             // get usb header
-  }
-}
-
-void rxMidiToLeds()
-{
-  // Reject incorrect channel messages
-  if (rxChannel != MIDI_CHANNEL)
-  {
-    return;
-  }
-
-  // NOTE ON
-  if (rxMidiMessageType == 9)
-  {
-    for (int i = 0; i < LED_NUM; i++)
-    {
-      // if receiving noteON AND pitch matches LED
-      if (rxMidiMessageType == 9 && rxPitch == i)
-      {
-        leds[i] = CHSV(map(rxVelocity, 0, 127, 0, 255), 255, 255); // control led on by hue
-        FastLED.show();
-      }
-    }
-  }
-  // NOTE OFF
-  else if (rxMidiMessageType == 8)
-  {
-    for (int i = 0; i < LED_NUM; i++)
-    {
-      if (rxMidiMessageType == 8 && rxPitch == i)
-      {
-        leds[i] = CHSV(0, 0, 0); // turn LED off
-        FastLED.show();
-      }
-    }
-  }
-}
-
-// DEBUG raw rxMidi data
 void serialDebug()
 {
-
-  if (rxUsbHeader != 0)
+  // DEBUG raw rxMidi data
+  if (rxMidi.usbHeader != 0)
   {
     Serial.print("USB-Header: ");
-    Serial.print(rxUsbHeader, HEX);
+    Serial.print(rxMidi.usbHeader, HEX);
 
     Serial.print(" / Type: ");
-    switch (rxMidiMessageType)
+    switch (rxMidi.type)
     {
-    case 8:
+    case 0x08:
       Serial.print("NoteOFF");
       break;
-    case 9:
+    case 0x09:
       Serial.print("NoteON");
       break;
-    case 11:
+    case 0x0B:
       Serial.print("CC");
+      break;
+    case 0x0C:
+      Serial.print("PC");
       break;
     default:
       Serial.print("[");
-      Serial.print(rxMidiMessageType);
+      Serial.print(rxMidi.type);
       Serial.print("]");
       break;
     }
 
     Serial.print(" / Channel: ");
-    Serial.print(rxChannel);
+    Serial.print(rxMidi.channel);
 
     Serial.print(" / Pitch: ");
-    Serial.print(rxPitch);
+    Serial.print(rxMidi.pitch);
 
     Serial.print(" / Velocity: ");
-    Serial.println(rxVelocity);
+    Serial.println(rxMidi.velocity);
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////
-// MIDI Send Commands
+/////////////////////////////////////////////////////////////////////////////////////
+// MIDI messages via serial bus
+
+// Sends a midi signal on the serial bus
+// cmd = message type and channel,
+// 0xFF is out of the 7bit midi range and will not be sent
+void midiSerial(byte cmd, byte pitch = 0xFF, byte velocity = 0xFF)
+{
+#ifndef __INTELLISENSE__
+  Serial1.write(cmd);
+#endif
+  if (pitch <= 0x7F)
+  {
+#ifndef __INTELLISENSE__
+    Serial1.write(pitch);
+#endif
+  }
+  if (velocity <= 0x7F)
+  {
+#ifndef __INTELLISENSE__
+    Serial1.write(velocity);
+#endif
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
+// Functions for sending Midi Messages
+
+void midiStart(byte channel)
+{
+  midiEventPacket_t ccPacket = {0x0F, 0xFA | channel, 0x00, 0x00};
+  MidiUSB.sendMIDI(ccPacket); // queue message to buffer
+  midiSerial(0xFA | channel);
+}
+
+void midiStop(byte channel)
+{
+  midiEventPacket_t ccPacket = {0x0F, 0xFC | channel, 0x00, 0x00};
+  MidiUSB.sendMIDI(ccPacket); // queue message to buffer
+  midiSerial(0xFC | channel);
+}
+
+void midiCont(byte channel)
+{
+  midiEventPacket_t ccPacket = {0x0F, 0xFB | channel, 0x00, 0x00};
+  MidiUSB.sendMIDI(ccPacket); // queue message to buffer
+  midiSerial(0xFB | channel);
+}
 
 void noteOn(byte channel, byte pitch, byte velocity)
 {
-  midiEventPacket_t noteOn = {0x09, 0x90 | channel, pitch, velocity};
-  MidiUSB.sendMIDI(noteOn);
-  serialMidiCommand(0x90 | channel, pitch, velocity);
+  midiEventPacket_t noteOnPacket = {0x09, 0x90 | channel, pitch, velocity};
+  MidiUSB.sendMIDI(noteOnPacket); // queue message to buffer
+  midiSerial(0x90 | channel, pitch, velocity);
 }
 
-void noteOff(byte channel, byte pitch, byte velocity)
+void noteOff(byte channel, byte pitch)
 {
-  midiEventPacket_t noteOff = {0x08, 0x80 | channel, pitch, velocity};
-  MidiUSB.sendMIDI(noteOff);
-  serialMidiCommand(0x80 | channel, pitch, velocity);
+  // midiEventPacket_t noteOffPacket = {0x08, 0x80 | channel, pitch, 0}; // note off message
+  midiEventPacket_t noteOnPacket = {0x09, 0x90 | channel, pitch, 0}; // note on with velocity 0
+  MidiUSB.sendMIDI(noteOnPacket);                                    // queue message to buffer
+  // midiSerial(0x80 | channel, pitch, 0); // note off message
+  midiSerial(0x90 | channel, pitch, 0); // note on with velocity 0
 }
 
 void controlChange(byte channel, byte control, byte value)
 {
-  midiEventPacket_t event = {0x0B, 0xB0 | channel, control, value};
-  MidiUSB.sendMIDI(event);
-  serialMidiCommand(0xB0 | channel, control, value);
+  midiEventPacket_t ccPacket = {0x0B, 0xB0 | channel, control, value};
+  MidiUSB.sendMIDI(ccPacket); // queue message to buffer
+  midiSerial(0xB0 | channel, control, value);
 }
 
-// Send MIDI commands via hardware serial pin1 (Tx)
-void serialMidiCommand(int cmd, int byte2, int byte3)
+void programChange(byte channel, byte program)
 {
-  Serial1.write(cmd);
-  Serial1.write(byte2);
-  Serial1.write(byte3);
+  midiEventPacket_t ccPacket = {0x0C, 0xC0 | channel, program, 0x00};
+  MidiUSB.sendMIDI(ccPacket); // queue message to buffer
+  midiSerial(0xC0 | channel, program);
 }
+
+void sendMidi(midiMessage type, byte channel, byte val1, byte val2)
+{
+  switch (type)
+  {
+  case midiMessage::NOTE:
+    noteOn(channel, val1, val2);
+    break;
+  case midiMessage::NOTE_OFF:
+    noteOff(channel, val1);
+    break;
+  case midiMessage::CC:
+    controlChange(channel, val1, val2);
+    break;
+  case midiMessage::PC:
+    programChange(channel, val1);
+    break;
+  case midiMessage::START:
+    midiStart(channel);
+    break;
+  case midiMessage::STOP:
+    midiStop(channel);
+    break;
+  case midiMessage::CONT:
+    midiCont(channel);
+    break;
+  }
+  MidiUSB.flush(); // send midi buffer
+};
