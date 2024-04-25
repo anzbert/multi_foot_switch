@@ -1,6 +1,5 @@
 #include <MIDIUSB.h>
 #include <FastLED.h>
-#include <ResponsiveAnalogRead.h>
 
 // NUMBER OF FOOT SWITCHES AND LEDS
 const byte NUM_BUTTONS = 4; // 2 internal buttons + 2 external
