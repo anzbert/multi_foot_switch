@@ -73,9 +73,10 @@ const unsigned int VAR_THRESHOLD = 16; // Threshold for the potentiometer signal
 const unsigned int DEBOUNCE_DELAY = 50; // debounce time in ms; increase if the output flickers
 
 // DON'T CHANGE THESE:
-// Number of programs can't be changed on this device
+// Number of programs can't be changed on this device. This setting was made for the larger version
 const byte NUM_PROGRAMS = 1;
 const program PROGRAMS[NUM_PROGRAMS] = {PROG0};
+const byte currentProg = 0x00; // stores currently selected program
 
 // ////////////////////////////////////////////////////////////////////////////////////
 // ////////////////////////////////////////////////////////////////////////////////////
@@ -86,11 +87,6 @@ const program PROGRAMS[NUM_PROGRAMS] = {PROG0};
 // Holds LEDS state
 CRGB leds[NUM_LEDS] = {};
 bool lastLedState[NUM_LEDS] = {};
-
-// stores currently selected program
-byte currentProg = 0x00;
-byte lastProgPin1State = 0xFF;
-byte lastProgPin2State = 0xFF;
 
 // stores current on/off state for toggles for all programs
 bool currentlyOnStates[NUM_PROGRAMS][NUM_BUTTONS] = {};
@@ -104,9 +100,6 @@ int potPreviousState = 0;
 unsigned long potPreviousTime = 0;
 bool potStillMoving = true;
 byte exprPreviousMidiValue = 0xFF;
-
-// counts received midi clock pulses
-byte midiClockCounter = 0x00;
 
 /////////////////////////////////////////////////////////////////////
 /////////////////// !! SETUP !! /////////////////////////////////////
@@ -141,7 +134,7 @@ void setup()
 //////////// !! LOOP !! //////////////////////////////////////////
 void loop()
 {
-  // updateProgram();
+  // updateProgram(); // not implemented on this device. made for the larger version with different programs
 
   sendFootSwitchMidi();
 
@@ -153,17 +146,10 @@ void loop()
 
   updateLeds(refreshedRxMidi);
 
-  // serialDebug();
+  // serialDebug(refreshedRxMidi); for debugging received midi
 }
 //////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////
-
-// UPDATE PROGRAM
-// void updateProgram()
-// {
-// not implemented on this device yet
-// should just change 'currentProg' and refresh LED color
-// }
 
 // BUTTONS
 void sendFootSwitchMidi()
