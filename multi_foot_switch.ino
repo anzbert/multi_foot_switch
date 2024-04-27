@@ -134,7 +134,7 @@ void setup()
 //////////// !! LOOP !! //////////////////////////////////////////
 void loop()
 {
-  // updateProgram(); // not implemented on this device. made for the larger version with different programs
+  // updateProgram(); // not implemented on this device
 
   sendFootSwitchMidi();
 
@@ -146,7 +146,7 @@ void loop()
 
   updateLeds(refreshedRxMidi);
 
-  // serialDebug(refreshedRxMidi); for debugging received midi
+  // serialDebug(refreshedRxMidi); // for debugging received midi
 }
 //////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////
